@@ -1,6 +1,12 @@
 import unittest
 import numpy as np
 import json
+import sys
+from pathlib import Path
+
+# Add src directory to Python path
+sys.path.append(str(Path(__file__).parent.parent / 'src'))
+
 from radiantheat import generate_grid, generate_coordinates, validate_inputs
 
 class TestRadiantHeating(unittest.TestCase):
