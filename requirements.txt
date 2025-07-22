@@ -1,0 +1,3 @@
+numpy>=1.24.0
+matplotlib>=3.7.0
+# unittest and json are part of Python's standard library 
