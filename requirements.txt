@@ -1,9 +1,14 @@
 # Core dependencies
-numpy>=1.24.0,<2.0.0  # For numerical operations and calculations
-matplotlib>=3.7.0,<4.0.0  # For plotting and animations
+numpy>=1.24.0,<3.0.0  # For numerical operations and calculations
+matplotlib>=3.7.0,<4.0.0  # For the interactive CLI visualization
+
+# Web API
+flask>=3.0.0,<4.0.0  # HTTP interface for other services / the browser UI
 
 # Testing dependencies
-pytest>=7.4.0,<8.0.0  # Alternative test runner (more features than unittest)
-pytest-cov>=4.1.0,<5.0.0  # For test coverage reporting
+pytest>=7.4.0  # Test runner
+pytest-cov>=4.1.0  # Test coverage reporting
 
-# Note: unittest and json are part of Python's standard library 
+# Note: unittest and json are part of Python's standard library
+# Optional: install gunicorn to serve the API in production
+#   pip install gunicorn && gunicorn --chdir src 'api:create_app()'

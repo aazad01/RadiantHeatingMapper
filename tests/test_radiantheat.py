@@ -16,8 +16,10 @@ class TestRadiantHeating(unittest.TestCase):
         self.room_width = 10.0
         self.pipe_spacing = 1.0
         
-        # Load test coordinates from JSON
-        with open('test_coordinates.json', 'r') as f:
+        # Load test coordinates from JSON (resolve relative to this file so the
+        # suite runs from any working directory, including the repo root in CI).
+        fixture = Path(__file__).parent / 'test_coordinates.json'
+        with open(fixture, 'r') as f:
             self.test_data = json.load(f)
         
     def test_validate_inputs(self):
