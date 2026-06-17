@@ -137,13 +137,15 @@ def generate_coordinates(room_length, room_width, pipe_spacing, verbose=False):
     - num_horizontal_lines: Number of horizontal grid lines
     - total_length: Total length of pipe used in meters
     """
-    # Calculate grid points
-    x_min = 1.0
-    y_min = 1.0
+    # Calculate grid points. The first/last pipe run sits one pipe-spacing in
+    # from each wall, which is standard practice and keeps the loop spacing
+    # uniform right up to the boundary turn.
+    x_min = pipe_spacing
+    y_min = pipe_spacing
 
     # Calculate number of vertical and horizontal lines
-    num_vertical_lines = int((room_width - 2) / pipe_spacing) + 1
-    num_horizontal_lines = int((room_length - 2) / pipe_spacing) + 1
+    num_vertical_lines = int((room_width - 2 * pipe_spacing) / pipe_spacing) + 1
+    num_horizontal_lines = int((room_length - 2 * pipe_spacing) / pipe_spacing) + 1
 
     # Ensure we have enough space for at least a 2x2 grid
     if num_vertical_lines < 2 or num_horizontal_lines < 2:
@@ -211,8 +213,8 @@ def generate_coordinates(room_length, room_width, pipe_spacing, verbose=False):
 
     if verbose:
         # Calculate coverage area
-        usable_width = room_width - 2
-        usable_length = room_length - 2
+        usable_width = room_width - 2 * pipe_spacing
+        usable_length = room_length - 2 * pipe_spacing
         coverage_area = usable_width * usable_length
         total_area = room_width * room_length
         coverage_percent = (coverage_area / total_area) * 100
@@ -315,8 +317,8 @@ def compute_layout(room_length, room_width, pipe_spacing=0.2):
         raise LayoutError(str(exc)) from exc
 
     total_area = room_width * room_length
-    usable_width = max(room_width - 2, 0)
-    usable_length = max(room_length - 2, 0)
+    usable_width = max(room_width - 2 * pipe_spacing, 0)
+    usable_length = max(room_length - 2 * pipe_spacing, 0)
     coverage_area = usable_width * usable_length
     coverage_percent = (coverage_area / total_area) * 100 if total_area else 0.0
 

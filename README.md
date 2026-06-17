@@ -178,8 +178,8 @@ Covered area: 64.00m²
 Coverage percentage: 64.0%
 
 Pipe Information:
-Total pipe length: 77.00m
-Pipe length per m² of room: 0.77m/m²
+Total pipe length: 71.00m
+Pipe length per m² of room: 0.71m/m²
 ```
 
 ### Visualization
@@ -206,12 +206,35 @@ The script provides two types of visualizations:
    - Grid overlay
    - Room boundaries
 
+## Examples
+
+The [`examples/`](examples/) directory contains runnable demonstrations:
+
+- [`examples/usage.py`](examples/usage.py) — using the engine as a Python library.
+- [`examples/api_requests.sh`](examples/api_requests.sh) — calling the HTTP API with `curl`.
+- [`examples/generate_gallery.py`](examples/generate_gallery.py) — renders a gallery of
+  layouts for realistic rooms (bathroom, bedroom, living room, hallway, warehouse, …).
+
+A pre-rendered gallery with pipe-length and coverage figures for each room is in
+[`examples/README.md`](examples/README.md). Regenerate it with:
+
+```bash
+python examples/generate_gallery.py
+```
+
+> **Edge offset:** the first and last pipe runs sit one pipe-spacing in from the
+> walls, so coverage scales sensibly with the chosen spacing for rooms of any size.
+
 ## Testing
 
 Run the full test suite from the repository root:
 ```bash
 python -m pytest tests/ -v
 ```
+
+`tests/test_real_world.py` exercises a range of realistic room sizes and pipe
+spacings, asserting structural invariants (grid alignment, uniform axis-aligned
+steps, pipes inside the walls, plausible pipe length and coverage).
 
 CI runs the same suite (with coverage) on every push and pull request across
 Python 3.9–3.12 via `.github/workflows/ci.yml`.

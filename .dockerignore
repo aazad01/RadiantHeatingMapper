@@ -6,6 +6,7 @@ build/
 dist/
 *.spec
 tests/
+examples/
 .venv/
 venv/
 .pytest_cache/
