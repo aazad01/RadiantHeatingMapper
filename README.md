@@ -64,6 +64,34 @@ print(layout["coverage"]["coverage_percent"])  # 64.0
 print(layout["coordinates"][:3])        # [[1.0, 1.0], [1.0, 2.0], [1.0, 3.0]]
 ```
 
+### Standalone executable
+
+Build a self-contained binary (no Python install required to run it):
+
+```bash
+./build_executable.sh        # produces dist/radiant-heat
+```
+
+The executable exposes the same engine via subcommands:
+
+```bash
+./dist/radiant-heat compute --length 10 --width 10 --spacing 1   # print JSON layout
+./dist/radiant-heat svg --length 10 --width 10 -o layout.svg     # write an SVG file
+./dist/radiant-heat serve --port 8000                            # run the HTTP API
+```
+
+CI also builds the Linux binary on every run and publishes it as the
+`radiant-heat-linux-x86_64` artifact. The bundled binary excludes matplotlib to
+stay small; the interactive `show` command works from a source checkout with
+`pip install -e '.[viz]'`.
+
+If you prefer a pip-installed command instead of a frozen binary:
+
+```bash
+pip install -e .
+radiant-heat compute --length 10 --width 10 --spacing 1
+```
+
 ### Web API
 
 Start the service:

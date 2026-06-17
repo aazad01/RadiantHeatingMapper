@@ -44,3 +44,25 @@ jobs:
           name: coverage-${{ matrix.python-version }}
           path: coverage.xml
           if-no-files-found: ignore
+
+  build-executable:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Build standalone executable
+        run: ./build_executable.sh
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: radiant-heat-linux-x86_64
+          path: dist/radiant-heat
+          if-no-files-found: error
