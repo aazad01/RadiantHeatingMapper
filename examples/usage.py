@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from radiantheat import compute_layout  # noqa: E402
-from render import render_svg  # noqa: E402
+from render import render_png  # noqa: E402
 
 
 def main():
@@ -23,9 +23,9 @@ def main():
     print(f"Path points: {len(layout['coordinates'])}")
     print(f"First 3 pts: {layout['coordinates'][:3]}")
 
-    # Render and save an SVG of the layout.
-    out = Path(__file__).resolve().parent / "bedroom_usage.svg"
-    out.write_text(render_svg(layout), encoding="utf-8")
+    # Render and save a PNG of the layout (needs matplotlib).
+    out = Path(__file__).resolve().parent / "bedroom_usage.png"
+    render_png(layout, out)
     print(f"\nWrote {out}")
 
 

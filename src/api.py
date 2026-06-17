@@ -25,8 +25,8 @@ from flask import Flask, jsonify, request, Response
 # Allow running as a script (``python src/api.py``) as well as a module.
 sys.path.append(str(Path(__file__).resolve().parent))
 
-from radiantheat import compute_layout, LayoutError  # noqa: E402
-from render import render_svg  # noqa: E402
+from radiantheat import compute_layout, compute_floor_layout, LayoutError  # noqa: E402
+from render import render_svg, render_png  # noqa: E402
 
 DEFAULT_SPACING = 0.2
 
@@ -67,6 +67,31 @@ def _layout_from_request():
     return compute_layout(room_length, room_width, pipe_spacing)
 
 
+def _floor_from_request():
+    """Build a floor-plan layout from a JSON request body."""
+    body = request.get_json(silent=True) or {}
+    rooms = body.get("rooms")
+    if not isinstance(rooms, list) or not rooms:
+        raise ValueError("Body must include a non-empty 'rooms' list")
+    spacing = body.get("pipe_spacing", DEFAULT_SPACING)
+    try:
+        spacing = float(spacing)
+    except (TypeError, ValueError):
+        raise ValueError("'pipe_spacing' must be a number")
+    return compute_floor_layout(rooms, pipe_spacing=spacing, openings=body.get("openings"))
+
+
+def _png_response(layout):
+    """Render a layout to a PNG response, or 501 if matplotlib is unavailable."""
+    import io
+    buf = io.BytesIO()
+    try:
+        render_png(layout, buf)
+    except RuntimeError as exc:  # matplotlib not installed in this build
+        return jsonify({"error": str(exc)}), 501
+    return Response(buf.getvalue(), mimetype="image/png")
+
+
 def create_app():
     """Application factory. Returns a configured Flask app."""
     app = Flask(__name__)
@@ -99,6 +124,51 @@ def create_app():
             width_px = 640
         svg = render_svg(layout, width_px=max(200, min(width_px, 2000)))
         return Response(svg, mimetype="image/svg+xml")
+
+    @app.get("/api/layout.png")
+    def api_layout_png():
+        try:
+            layout = _layout_from_request()
+        except LayoutError as exc:
+            return jsonify({"error": str(exc)}), 422
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return _png_response(layout)
+
+    @app.post("/api/floor")
+    def api_floor():
+        try:
+            floor = _floor_from_request()
+        except LayoutError as exc:
+            return jsonify({"error": str(exc)}), 422
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(floor)
+
+    @app.post("/api/floor.svg")
+    def api_floor_svg():
+        try:
+            floor = _floor_from_request()
+        except LayoutError as exc:
+            return jsonify({"error": str(exc)}), 422
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        try:
+            width_px = int(request.args.get("width", 720))
+        except (TypeError, ValueError):
+            width_px = 720
+        return Response(render_svg(floor, width_px=max(200, min(width_px, 2000))),
+                        mimetype="image/svg+xml")
+
+    @app.post("/api/floor.png")
+    def api_floor_png():
+        try:
+            floor = _floor_from_request()
+        except LayoutError as exc:
+            return jsonify({"error": str(exc)}), 422
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return _png_response(floor)
 
     @app.get("/openapi.json")
     def openapi():
@@ -165,6 +235,53 @@ _OPENAPI_SPEC = {
                                       "content": {"image/svg+xml": {}}}},
             }
         },
+        "/api/layout.png": {
+            "get": {
+                "summary": "Render a single room as PNG (requires matplotlib)",
+                "parameters": [
+                    {"name": "room_length", "in": "query", "required": True, "schema": {"type": "number"}},
+                    {"name": "room_width", "in": "query", "required": True, "schema": {"type": "number"}},
+                    {"name": "pipe_spacing", "in": "query", "required": False, "schema": {"type": "number"}},
+                ],
+                "responses": {"200": {"description": "PNG image", "content": {"image/png": {}}},
+                              "501": {"description": "PNG rendering unavailable (matplotlib not installed)"}},
+            }
+        },
+        "/api/floor": {
+            "post": {
+                "summary": "Compute a multi-room floor plan (separate loop per room)",
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": {"$ref": "#/components/schemas/FloorRequest"}}},
+                },
+                "responses": {
+                    "200": {"description": "Computed floor plan"},
+                    "400": {"description": "Invalid parameters"},
+                    "422": {"description": "A room is too small / unprocessable"},
+                },
+            }
+        },
+        "/api/floor.svg": {
+            "post": {
+                "summary": "Render a floor plan as SVG",
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": {"$ref": "#/components/schemas/FloorRequest"}}},
+                },
+                "responses": {"200": {"description": "SVG image", "content": {"image/svg+xml": {}}}},
+            }
+        },
+        "/api/floor.png": {
+            "post": {
+                "summary": "Render a floor plan as PNG (requires matplotlib)",
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": {"$ref": "#/components/schemas/FloorRequest"}}},
+                },
+                "responses": {"200": {"description": "PNG image", "content": {"image/png": {}}},
+                              "501": {"description": "PNG rendering unavailable (matplotlib not installed)"}},
+            }
+        },
         "/health": {"get": {"summary": "Health check",
                             "responses": {"200": {"description": "Service healthy"}}}},
     },
@@ -191,6 +308,32 @@ _OPENAPI_SPEC = {
                     "pipe_length_m": {"type": "number"},
                     "coverage": {"type": "object"},
                     "warnings": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            "FloorRequest": {
+                "type": "object",
+                "required": ["rooms"],
+                "properties": {
+                    "pipe_spacing": {"type": "number", "default": DEFAULT_SPACING},
+                    "openings": {
+                        "type": "array",
+                        "description": "Doorway openings cut out of walls, each [x1, y1, x2, y2] in floor meters.",
+                        "items": {"type": "array", "items": {"type": "number"}},
+                    },
+                    "rooms": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["x", "y", "width", "length"],
+                            "properties": {
+                                "name": {"type": "string"},
+                                "x": {"type": "number", "description": "Room bottom-left X in floor coords (m)."},
+                                "y": {"type": "number", "description": "Room bottom-left Y in floor coords (m)."},
+                                "width": {"type": "number"},
+                                "length": {"type": "number"},
+                            },
+                        },
+                    },
                 },
             },
         }

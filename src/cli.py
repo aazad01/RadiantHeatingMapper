@@ -19,8 +19,8 @@ from pathlib import Path
 # Support running both as an installed module and as a frozen/script file.
 sys.path.append(str(Path(__file__).resolve().parent))
 
-from radiantheat import compute_layout, LayoutError  # noqa: E402
-from render import render_svg  # noqa: E402
+from radiantheat import compute_layout, compute_floor_layout, LayoutError  # noqa: E402
+from render import render_svg, render_png  # noqa: E402
 
 
 def _add_layout_args(parser):
@@ -46,6 +46,42 @@ def _cmd_svg(args):
         print(f"Wrote {args.output}")
     else:
         sys.stdout.write(svg)
+    return 0
+
+
+def _cmd_png(args):
+    layout = compute_layout(args.length, args.width, args.spacing)
+    render_png(layout, args.output, dpi=args.dpi)
+    print(f"Wrote {args.output}")
+    return 0
+
+
+def _load_rooms(args):
+    if args.rooms_file:
+        text = Path(args.rooms_file).read_text(encoding="utf-8")
+    elif args.rooms:
+        text = args.rooms
+    else:
+        text = sys.stdin.read()
+    data = json.loads(text)
+    # Accept either a bare list of rooms or {"rooms": [...], "pipe_spacing", "openings"}.
+    if isinstance(data, dict):
+        return data.get("rooms", []), data.get("pipe_spacing", args.spacing), data.get("openings")
+    return data, args.spacing, None
+
+
+def _cmd_floor(args):
+    rooms, spacing, openings = _load_rooms(args)
+    floor = compute_floor_layout(rooms, pipe_spacing=spacing, openings=openings)
+    if args.svg or args.png:
+        out = args.output or ("floor.png" if args.png else "floor.svg")
+        if args.png:
+            render_png(floor, out)
+        else:
+            Path(out).write_text(render_svg(floor), encoding="utf-8")
+        print(f"Wrote {out}")
+    else:
+        print(json.dumps(floor, indent=2))
     return 0
 
 
@@ -98,6 +134,22 @@ def build_parser():
     p_serve.add_argument("--port", "-p", type=int, default=8000, help="Bind port (default: 8000).")
     p_serve.add_argument("--debug", action="store_true", help="Enable Flask debug mode.")
     p_serve.set_defaults(func=_cmd_serve)
+
+    p_png = sub.add_parser("png", help="Render a layout as a PNG image (needs matplotlib).")
+    _add_layout_args(p_png)
+    p_png.add_argument("--output", "-o", default="layout.png", help="Output PNG path.")
+    p_png.add_argument("--dpi", type=int, default=110, help="Output resolution (default: 110).")
+    p_png.set_defaults(func=_cmd_png)
+
+    p_floor = sub.add_parser("floor", help="Compute a multi-room floor plan (rooms as JSON).")
+    p_floor.add_argument("--rooms-file", help="Path to a JSON file of rooms (or a {rooms, pipe_spacing} object).")
+    p_floor.add_argument("--rooms", help="Inline JSON list of rooms. Reads stdin if neither is given.")
+    p_floor.add_argument("--spacing", "-s", type=float, default=0.2,
+                         help="Pipe spacing in meters if not set in the JSON (default: 0.2).")
+    p_floor.add_argument("--svg", action="store_true", help="Render SVG instead of printing JSON.")
+    p_floor.add_argument("--png", action="store_true", help="Render PNG instead of printing JSON.")
+    p_floor.add_argument("--output", "-o", help="Output file path for --svg/--png.")
+    p_floor.set_defaults(func=_cmd_floor)
 
     p_show = sub.add_parser("show", help="Open the interactive matplotlib visualizer.")
     _add_layout_args(p_show)

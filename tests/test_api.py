@@ -67,6 +67,44 @@ class TestApi(unittest.TestCase):
         self.assertIn("image/svg+xml", resp.content_type)
         self.assertIn(b"<svg", resp.data)
 
+    def test_png_endpoint(self):
+        resp = self.client.get("/api/layout.png?room_length=5&room_width=4&pipe_spacing=0.2")
+        # 200 with PNG when matplotlib is available, 501 otherwise.
+        self.assertIn(resp.status_code, (200, 501))
+        if resp.status_code == 200:
+            self.assertIn("image/png", resp.content_type)
+            self.assertEqual(resp.data[:8], b"\x89PNG\r\n\x1a\n")
+
+    def test_floor_endpoint(self):
+        resp = self.client.post("/api/floor", json={
+            "pipe_spacing": 0.2,
+            "rooms": [
+                {"name": "A", "x": 0, "y": 0, "width": 5, "length": 4},
+                {"name": "B", "x": 5, "y": 0, "width": 3, "length": 4},
+            ],
+        })
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["totals"]["num_rooms"], 2)
+        self.assertEqual(len(data["rooms"]), 2)
+
+    def test_floor_svg_endpoint(self):
+        resp = self.client.post("/api/floor.svg", json={
+            "rooms": [{"x": 0, "y": 0, "width": 5, "length": 4}]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("image/svg+xml", resp.content_type)
+        self.assertIn(b"<svg", resp.data)
+
+    def test_floor_empty_rooms_is_400(self):
+        resp = self.client.post("/api/floor", json={"rooms": []})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_floor_room_too_small_is_422(self):
+        resp = self.client.post("/api/floor", json={
+            "pipe_spacing": 0.6,
+            "rooms": [{"x": 0, "y": 0, "width": 1.0, "length": 1.0}]})
+        self.assertEqual(resp.status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()

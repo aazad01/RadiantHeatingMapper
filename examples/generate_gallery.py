@@ -1,8 +1,7 @@
-"""Generate a gallery of example radiant heating layouts.
+"""Generate a PNG gallery of example radiant heating layouts.
 
-Runs the layout engine for a set of realistic rooms, writes an SVG for each
-into ``examples/gallery/`` and (re)builds ``examples/README.md`` with a table
-and embedded previews. No server required.
+Renders single rooms and a multi-room floor plan (with interior walls and
+dimensions) into ``examples/gallery/`` and rebuilds ``examples/README.md``.
 
     python examples/generate_gallery.py
 """
@@ -13,18 +12,36 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from radiantheat import compute_layout  # noqa: E402
-from render import render_svg  # noqa: E402
+from radiantheat import compute_layout, compute_floor_layout  # noqa: E402
+from render import render_png  # noqa: E402
 
-# (name, room_length m, room_width m, pipe_spacing m, note)
+# Single rooms: (name, length m, width m, spacing m, note)
 ROOMS = [
     ("Bathroom", 3.0, 2.0, 0.15, "Small wet room, tight 150 mm spacing for fast warm-up."),
     ("Bedroom", 5.0, 4.0, 0.20, "Typical bedroom at standard 200 mm spacing."),
-    ("Kitchen", 5.0, 3.5, 0.15, "Higher output for a hard-floor kitchen."),
     ("Living room", 8.0, 6.0, 0.20, "Open living space, 200 mm spacing."),
-    ("Open-plan floor", 12.0, 9.0, 0.25, "Large open plan, 250 mm spacing."),
     ("Hallway", 8.0, 1.6, 0.15, "Long, narrow corridor."),
-    ("Warehouse bay", 30.0, 25.0, 0.30, "Industrial slab (750 m²), static layout."),
+    ("Warehouse bay", 30.0, 25.0, 0.30, "Industrial slab (750 m²)."),
+]
+
+# Multi-room floor plans: (name, [rooms], spacing, [openings], note)
+FLOORS = [
+    ("Apartment floor plan",
+     [
+         {"name": "Living", "x": 0, "y": 0, "width": 6, "length": 5},
+         {"name": "Kitchen", "x": 6, "y": 0, "width": 4, "length": 5},
+         {"name": "Bedroom", "x": 0, "y": 5, "width": 6, "length": 4},
+         {"name": "Bathroom", "x": 6, "y": 5, "width": 4, "length": 4},
+     ],
+     0.2,
+     [
+         [2.5, 0, 3.4, 0],     # entry door (south wall)
+         [6, 2.0, 6, 2.9],     # Living <-> Kitchen
+         [2.0, 5, 2.9, 5],     # Living <-> Bedroom
+         [7.0, 5, 7.9, 5],     # Kitchen <-> Bathroom
+         [6, 6.5, 6, 7.4],     # Bedroom <-> Bathroom
+     ],
+     "Four rooms with doorway openings; each room has its own loop."),
 ]
 
 
@@ -35,31 +52,41 @@ def slug(name):
 def main():
     gallery = Path(__file__).resolve().parent / "gallery"
     gallery.mkdir(exist_ok=True)
+    # Clear stale artifacts (e.g. older SVGs) so the gallery matches this run.
+    for old in gallery.glob("*.svg"):
+        old.unlink()
 
     rows = []
     for name, length, width, spacing, note in ROOMS:
         layout = compute_layout(length, width, spacing)
-        svg = render_svg(layout, width_px=520)
-        filename = f"{slug(name)}.svg"
-        (gallery / filename).write_text(svg, encoding="utf-8")
-
+        filename = f"{slug(name)}.png"
+        render_png(layout, gallery / filename)
         cov = layout["coverage"]
         rows.append({
-            "name": name,
-            "note": note,
-            "file": filename,
-            "dims": f"{width:g} × {length:g} m",
-            "spacing": f"{spacing*1000:g} mm",
-            "area": f"{cov['room_area_m2']:g} m²",
-            "pipe": f"{layout['pipe_length_m']:g} m",
+            "name": name, "note": note, "file": filename,
+            "dims": f"{width:g} × {length:g} m", "spacing": f"{spacing*1000:g} mm",
+            "area": f"{cov['room_area_m2']:g} m²", "pipe": f"{layout['pipe_length_m']:g} m",
             "coverage": f"{cov['coverage_percent']:g} %",
-            "density": f"{cov['pipe_length_per_m2']:g} m/m²",
         })
-        print(f"{name:18s} {rows[-1]['dims']:>12s} @ {rows[-1]['spacing']:>7s} "
-              f"-> pipe {rows[-1]['pipe']:>8s}, coverage {rows[-1]['coverage']:>6s}")
+        print(f"{name:20s} {rows[-1]['dims']:>12s} @ {rows[-1]['spacing']:>7s} "
+              f"-> pipe {rows[-1]['pipe']:>9s}, coverage {rows[-1]['coverage']:>6s}")
+
+    for name, rooms, spacing, openings, note in FLOORS:
+        floor = compute_floor_layout(rooms, pipe_spacing=spacing, openings=openings)
+        filename = f"{slug(name)}.png"
+        render_png(floor, gallery / filename)
+        t = floor["totals"]
+        rows.append({
+            "name": name, "note": note, "file": filename,
+            "dims": f"{floor['floor_width']:g} × {floor['floor_length']:g} m ({t['num_rooms']} rooms)",
+            "spacing": f"{spacing*1000:g} mm", "area": f"{t['floor_area_m2']:g} m²",
+            "pipe": f"{t['pipe_length_m']:g} m", "coverage": f"{t['coverage_percent']:g} %",
+        })
+        print(f"{name:20s} {rows[-1]['dims']:>22s} @ {rows[-1]['spacing']:>7s} "
+              f"-> pipe {rows[-1]['pipe']:>9s}, coverage {rows[-1]['coverage']:>6s}")
 
     _write_readme(Path(__file__).resolve().parent / "README.md", rows)
-    print(f"\nWrote {len(rows)} SVGs to {gallery} and updated examples/README.md")
+    print(f"\nWrote {len(rows)} PNGs to {gallery} and updated examples/README.md")
 
 
 def _write_readme(path, rows):
@@ -72,24 +99,16 @@ def _write_readme(path, rows):
         "python examples/generate_gallery.py",
         "```",
         "",
-        "| Room | Dimensions | Spacing | Area | Pipe length | Coverage | Density |",
-        "| ---- | ---------- | ------- | ---- | ----------- | -------- | ------- |",
+        "| Layout | Dimensions | Spacing | Area | Pipe length | Coverage |",
+        "| ------ | ---------- | ------- | ---- | ----------- | -------- |",
     ]
     for r in rows:
-        lines.append(
-            f"| {r['name']} | {r['dims']} | {r['spacing']} | {r['area']} | "
-            f"{r['pipe']} | {r['coverage']} | {r['density']} |"
-        )
+        lines.append(f"| {r['name']} | {r['dims']} | {r['spacing']} | {r['area']} | "
+                     f"{r['pipe']} | {r['coverage']} |")
     lines += ["", "## Previews", ""]
     for r in rows:
-        lines += [
-            f"### {r['name']}",
-            "",
-            f"{r['note']}",
-            "",
-            f"![{r['name']} layout](gallery/{r['file']})",
-            "",
-        ]
+        lines += [f"### {r['name']}", "", r["note"], "",
+                  f"![{r['name']} layout](gallery/{r['file']})", ""]
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
