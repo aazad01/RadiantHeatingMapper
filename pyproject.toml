@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "radiant-heat-mapper"
+version = "1.0.0"
+description = "Generate, visualize and serve radiant heating pipe layouts."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24.0,<3.0.0",
+    "flask>=3.0.0,<4.0.0",
+]
+
+[project.optional-dependencies]
+viz = ["matplotlib>=3.7.0,<4.0.0"]
+dev = ["pytest>=7.4.0", "pytest-cov>=4.1.0", "pyinstaller>=6.0.0"]
+
+[project.scripts]
+radiant-heat = "cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+py-modules = ["cli", "api", "render", "radiantheat"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

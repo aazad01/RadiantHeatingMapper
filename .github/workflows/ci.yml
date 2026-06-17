@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    env:
+      # Use a non-interactive matplotlib backend so headless imports never
+      # try to open a display.
+      MPLBACKEND: Agg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: coverage.xml
+          if-no-files-found: ignore
+
+  build-executable:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: radiant-heat-linux-x86_64
+            binary: dist/radiant-heat
+          - os: windows-latest
+            artifact: radiant-heat-windows-x86_64
+            binary: dist/radiant-heat.exe
+          - os: macos-latest
+            artifact: radiant-heat-macos-arm64
+            binary: dist/radiant-heat
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # Build directly with PyInstaller so the same step works on every OS
+      # (the build_executable.sh helper is bash-only). PyInstaller names the
+      # output radiant-heat.exe automatically on Windows.
+      - name: Install build dependencies
+        run: pip install pyinstaller numpy flask
+
+      - name: Build standalone executable
+        run: pyinstaller --clean --noconfirm radiant-heat.spec
+
+      - name: Smoke test executable
+        run: ${{ matrix.binary }} compute --length 10 --width 10 --spacing 1
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t radiant-heat:ci .
+
+      - name: Smoke test image (CLI)
+        run: docker run --rm radiant-heat:ci compute --length 10 --width 10 --spacing 1
+
+      - name: Smoke test image (API)
+        run: |
+          docker run -d --name rh -p 8000:8000 radiant-heat:ci
+          for i in $(seq 1 15); do
+            if curl -sf http://127.0.0.1:8000/health; then ok=1; break; fi
+            sleep 1
+          done
+          docker logs rh
+          docker rm -f rh
+          test "$ok" = "1"
+
+      # Publish to GitHub Container Registry on pushes to the default branch so
+      # the image can be pulled with `docker pull ghcr.io/<owner>/<repo>`.
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GHCR
+        if: github.event_name == 'push'
+        run: |
+          image="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          docker tag radiant-heat:ci "$image:latest"
+          docker tag radiant-heat:ci "$image:${{ github.sha }}"
+          docker push "$image:latest"
+          docker push "$image:${{ github.sha }}"
