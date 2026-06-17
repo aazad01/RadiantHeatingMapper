@@ -80,16 +80,48 @@ The executable exposes the same engine via subcommands:
 ./dist/radiant-heat serve --port 8000                            # run the HTTP API
 ```
 
-CI also builds the Linux binary on every run and publishes it as the
-`radiant-heat-linux-x86_64` artifact. The bundled binary excludes matplotlib to
-stay small; the interactive `show` command works from a source checkout with
-`pip install -e '.[viz]'`.
+PyInstaller binaries are **platform-specific** — a Linux build will not run on
+Windows or macOS. CI therefore builds a native binary for each OS on every run
+and publishes them as downloadable artifacts:
+
+| OS | Artifact | File |
+| -- | -------- | ---- |
+| Windows | `radiant-heat-windows-x86_64` | `radiant-heat.exe` |
+| macOS (Apple Silicon) | `radiant-heat-macos-arm64` | `radiant-heat` |
+| Linux | `radiant-heat-linux-x86_64` | `radiant-heat` |
+
+Download the one matching your OS from the workflow run's **Artifacts** section.
+The bundled binary excludes matplotlib to stay small; the interactive `show`
+command works from a source checkout with `pip install -e '.[viz]'`.
 
 If you prefer a pip-installed command instead of a frozen binary:
 
 ```bash
 pip install -e .
 radiant-heat compute --length 10 --width 10 --spacing 1
+```
+
+### Docker
+
+The most portable option — runs identically on Windows, macOS and Linux with
+Docker Desktop, with no platform-specific binary to worry about:
+
+```bash
+docker build -t radiant-heat .
+
+# Serve the API/UI on http://localhost:8000
+docker run --rm -p 8000:8000 radiant-heat
+
+# Or run the CLI directly
+docker run --rm radiant-heat compute --length 10 --width 10 --spacing 1
+```
+
+On pushes to the default branch, CI also publishes the image to GitHub
+Container Registry, so you can skip the build and pull it directly:
+
+```bash
+docker pull ghcr.io/aazad01/radiantheatingmapper:latest
+docker run --rm -p 8000:8000 ghcr.io/aazad01/radiantheatingmapper:latest
 ```
 
 ### Web API
