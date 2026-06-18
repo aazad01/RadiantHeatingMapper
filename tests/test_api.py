@@ -22,6 +22,19 @@ class TestApi(unittest.TestCase):
         resp = self.client.get("/")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("text/html", resp.content_type)
+        # The full front-end app (single room + floor plan) is served.
+        self.assertIn(b"Radiant Heating Layout Mapper", resp.data)
+        self.assertIn(b"Floor plan", resp.data)
+
+    def test_cors_headers_on_api(self):
+        resp = self.client.get("/api/layout?room_length=5&room_width=4&pipe_spacing=0.2")
+        self.assertEqual(resp.headers.get("Access-Control-Allow-Origin"), "*")
+
+    def test_cors_preflight(self):
+        resp = self.client.options("/api/floor")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers.get("Access-Control-Allow-Origin"), "*")
+        self.assertIn("POST", resp.headers.get("Access-Control-Allow-Methods", ""))
 
     def test_openapi(self):
         resp = self.client.get("/openapi.json")

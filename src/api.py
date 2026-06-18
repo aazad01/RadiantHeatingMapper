@@ -176,9 +176,42 @@ def create_app():
 
     @app.get("/")
     def index():
-        return Response(_INDEX_HTML, mimetype="text/html")
+        html = _load_web_index()
+        return Response(html, mimetype="text/html")
+
+    # Allow the API to be called from a separately-hosted front end (e.g. a
+    # static site on GitHub Pages). Origin is configurable; defaults to "*".
+    cors_origin = os.environ.get("RADIANT_CORS_ORIGIN", "*")
+
+    @app.after_request
+    def add_cors_headers(resp):
+        if request.path.startswith("/api/") or request.path == "/openapi.json":
+            resp.headers["Access-Control-Allow-Origin"] = cors_origin
+            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        return resp
 
     return app
+
+
+def _load_web_index():
+    """Return the front-end HTML, preferring the standalone web/index.html file.
+
+    Resolution order: ``RADIANT_WEB_DIR`` env var, then ``web/`` at the repo
+    root relative to this file. Falls back to the minimal embedded page so the
+    server always serves something, even from a wheel without the web assets.
+    """
+    candidates = []
+    env_dir = os.environ.get("RADIANT_WEB_DIR")
+    if env_dir:
+        candidates.append(Path(env_dir) / "index.html")
+    candidates.append(Path(__file__).resolve().parent.parent / "web" / "index.html")
+    for path in candidates:
+        try:
+            return path.read_text(encoding="utf-8")
+        except (OSError, ValueError):
+            continue
+    return _INDEX_HTML
 
 
 _OPENAPI_SPEC = {

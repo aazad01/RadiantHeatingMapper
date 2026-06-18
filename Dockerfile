@@ -13,7 +13,8 @@ FROM python:3.12-slim AS base
 # Don't write .pyc files; flush stdout/stderr immediately for container logs.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PORT=8000
+    PORT=8000 \
+    RADIANT_WEB_DIR=/app/web
 
 WORKDIR /app
 
@@ -21,6 +22,9 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
 RUN pip install --no-cache-dir .
+
+# Front-end web app served at "/".
+COPY web/ ./web/
 
 # Run as a non-root user.
 RUN useradd --create-home --uid 10001 appuser

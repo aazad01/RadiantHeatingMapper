@@ -130,6 +130,36 @@ docker pull ghcr.io/aazad01/radiantheatingmapper:latest
 docker run --rm -p 8000:8000 ghcr.io/aazad01/radiantheatingmapper:latest
 ```
 
+## Front end
+
+A browser front end lives in [`web/index.html`](web/index.html). It supports both
+single rooms and multi-room **floor plans** (with editable rooms and doorway
+openings), renders the layout inline, shows pipe-length/coverage stats, and can
+download the drawing as SVG or PNG.
+
+The running server serves it at its root:
+
+```bash
+docker run --rm -p 8000:8000 radiant-heat   # then open http://localhost:8000
+# or, from source:
+python src/api.py
+```
+
+### Deploying the front end separately (GitHub Pages)
+
+`web/` is a static, dependency-free page, so it can also be hosted on its own.
+The included workflow [`.github/workflows/pages.yml`](.github/workflows/pages.yml)
+publishes it to GitHub Pages on pushes to `main` (enable Pages → "GitHub Actions"
+in the repo settings). Because the page and API are then on different origins:
+
+- The API sends CORS headers (`Access-Control-Allow-Origin`, configurable via the
+  `RADIANT_CORS_ORIGIN` env var, default `*`), so cross-origin calls work.
+- In the page's **Backend settings**, set the **API base URL** to wherever the
+  API is hosted (e.g. your Docker/GHCR deployment). It is saved in the browser.
+
+When the front end is served by the API itself (Docker/`serve`), the API base
+can stay blank — calls go to the same origin automatically.
+
 ### Web API
 
 Start the service:
