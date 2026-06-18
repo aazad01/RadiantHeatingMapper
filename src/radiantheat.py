@@ -119,7 +119,7 @@ def calculate_pipe_length(coords):
     return total_length
 
 
-def generate_coordinates(room_length, room_width, pipe_spacing, verbose=False):
+def generate_coordinates(room_length, room_width, pipe_spacing, verbose=False, origin=(0.0, 0.0)):
     """
     Step by step pipe layout for a 10x10 room with 1m spacing:
 
@@ -129,6 +129,10 @@ def generate_coordinates(room_length, room_width, pipe_spacing, verbose=False):
     4. Go down to (8,1)
     5. Return along bottom row to (2,1)
 
+    ``origin`` shifts the whole layout by (x, y) so the same serpentine can be
+    placed inside a sub-room of a larger floor plan; it defaults to (0, 0),
+    which reproduces the original single-room behavior exactly.
+
     Returns:
     - coords: List of (x,y) coordinates for the pipe path
     - x_positions: List of x coordinates for grid lines
@@ -137,13 +141,17 @@ def generate_coordinates(room_length, room_width, pipe_spacing, verbose=False):
     - num_horizontal_lines: Number of horizontal grid lines
     - total_length: Total length of pipe used in meters
     """
-    # Calculate grid points
-    x_min = 1.0
-    y_min = 1.0
+    # Calculate grid points. The first/last pipe run sits one pipe-spacing in
+    # from each wall, which is standard practice and keeps the loop spacing
+    # uniform right up to the boundary turn.
+    ox, oy = origin
+    x_min = ox + pipe_spacing
+    y_min = oy + pipe_spacing
 
     # Calculate number of vertical and horizontal lines
-    num_vertical_lines = int((room_width - 2) / pipe_spacing) + 1
-    num_horizontal_lines = int((room_length - 2) / pipe_spacing) + 1
+    num_vertical_lines = int((room_width - 2 * pipe_spacing) / pipe_spacing) + 1
+    num_horizontal_lines = int((room_length - 2 * pipe_spacing) / pipe_spacing) + 1
+
 
     # Ensure we have enough space for at least a 2x2 grid
     if num_vertical_lines < 2 or num_horizontal_lines < 2:
@@ -211,8 +219,8 @@ def generate_coordinates(room_length, room_width, pipe_spacing, verbose=False):
 
     if verbose:
         # Calculate coverage area
-        usable_width = room_width - 2
-        usable_length = room_length - 2
+        usable_width = room_width - 2 * pipe_spacing
+        usable_length = room_length - 2 * pipe_spacing
         coverage_area = usable_width * usable_length
         total_area = room_width * room_length
         coverage_percent = (coverage_area / total_area) * 100
@@ -315,8 +323,8 @@ def compute_layout(room_length, room_width, pipe_spacing=0.2):
         raise LayoutError(str(exc)) from exc
 
     total_area = room_width * room_length
-    usable_width = max(room_width - 2, 0)
-    usable_length = max(room_length - 2, 0)
+    usable_width = max(room_width - 2 * pipe_spacing, 0)
+    usable_length = max(room_length - 2 * pipe_spacing, 0)
     coverage_area = usable_width * usable_length
     coverage_percent = (coverage_area / total_area) * 100 if total_area else 0.0
 
@@ -337,6 +345,201 @@ def compute_layout(room_length, room_width, pipe_spacing=0.2):
             "covered_area_m2": round(coverage_area, 4),
             "coverage_percent": round(coverage_percent, 2),
             "pipe_length_per_m2": round(float(total_length) / total_area, 4) if total_area else 0.0,
+        },
+        "warnings": warnings,
+    }
+
+
+def _rect_edges(x, y, width, length):
+    """Return the four wall segments (x1, y1, x2, y2) of a rectangle."""
+    return [
+        (x, y, x + width, y),                       # bottom
+        (x + width, y, x + width, y + length),      # right
+        (x + width, y + length, x, y + length),     # top
+        (x, y + length, x, y),                      # left
+    ]
+
+
+def _normalize_opening(op, index):
+    """Coerce an opening spec into an axis-aligned (x1, y1, x2, y2) segment."""
+    if isinstance(op, dict):
+        try:
+            return (float(op["x1"]), float(op["y1"]), float(op["x2"]), float(op["y2"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise LayoutError(f"Opening {index} must define numeric x1, y1, x2, y2") from exc
+    try:
+        x1, y1, x2, y2 = op
+        return (float(x1), float(y1), float(x2), float(y2))
+    except (TypeError, ValueError) as exc:
+        raise LayoutError(f"Opening {index} must be [x1, y1, x2, y2]") from exc
+
+
+def _cut_wall(wall, opening, tol=1e-6):
+    """Subtract a collinear axis-aligned opening from a wall, returning 0-2 pieces."""
+    x1, y1, x2, y2 = wall
+    ox1, oy1, ox2, oy2 = opening
+    if abs(y1 - y2) <= tol and abs(oy1 - oy2) <= tol and abs(y1 - oy1) <= tol:
+        # Horizontal wall and opening on the same line; cut along X.
+        a, b = sorted((x1, x2))
+        lo, hi = sorted((ox1, ox2))
+        lo, hi = max(a, lo), min(b, hi)
+        if hi <= lo:
+            return [wall]
+        pieces = []
+        if lo - a > tol:
+            pieces.append((a, y1, lo, y1))
+        if b - hi > tol:
+            pieces.append((hi, y1, b, y1))
+        return pieces
+    if abs(x1 - x2) <= tol and abs(ox1 - ox2) <= tol and abs(x1 - ox1) <= tol:
+        # Vertical wall and opening on the same line; cut along Y.
+        a, b = sorted((y1, y2))
+        lo, hi = sorted((oy1, oy2))
+        lo, hi = max(a, lo), min(b, hi)
+        if hi <= lo:
+            return [wall]
+        pieces = []
+        if lo - a > tol:
+            pieces.append((x1, a, x1, lo))
+        if b - hi > tol:
+            pieces.append((x1, hi, x1, b))
+        return pieces
+    return [wall]
+
+
+def _subtract_openings(walls, openings):
+    """Cut every opening out of any wall it lies on (doorways become gaps)."""
+    result = []
+    for wall in walls:
+        segments = [tuple(wall)]
+        for op in openings:
+            nxt = []
+            for seg in segments:
+                nxt.extend(_cut_wall(seg, op))
+            segments = nxt
+        result.extend(segments)
+    return result
+
+
+def compute_floor_layout(rooms, pipe_spacing=0.2, openings=None):
+    """Compute an independent serpentine loop for each room of a floor plan.
+
+    Interior walls are expressed by partitioning the floor into rectangular
+    rooms; each room gets its own loop and the room boundaries are returned as
+    wall segments for drawing. This models a real multi-room floor where pipe
+    does not run under the dividing walls.
+
+    Args:
+        rooms: list of dicts, each ``{"x", "y", "width", "length"}`` in meters
+            (``x``/``y`` is the room's bottom-left corner in floor coordinates)
+            with an optional ``"name"`` and an optional ``"openings"`` list.
+        pipe_spacing: spacing between adjacent pipe runs in meters.
+        openings: optional list of doorway/opening segments in floor
+            coordinates, each ``[x1, y1, x2, y2]`` (or a dict with those keys).
+            Any opening collinear with a wall is cut out of it, leaving a gap.
+            Per-room ``openings`` are merged into this list.
+
+    Returns:
+        A JSON-serializable dict describing the floor, its rooms (each with its
+        own ``coordinates``/``pipe_length_m``/``coverage``), the interior+
+        perimeter ``walls`` (with openings cut out), the ``openings`` and
+        floor-wide ``totals``.
+
+    Raises:
+        LayoutError: if ``rooms`` is empty or any room is invalid/too small.
+    """
+    if not rooms:
+        raise LayoutError("At least one room is required")
+
+    all_openings = list(openings) if openings else []
+
+    room_results = []
+    walls = []
+    warnings = []
+    total_pipe = 0.0
+    total_area = 0.0
+    total_covered = 0.0
+
+    for i, room in enumerate(rooms):
+        try:
+            x = float(room["x"])
+            y = float(room["y"])
+            width = float(room["width"])
+            length = float(room["length"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise LayoutError(f"Room {i} must define numeric x, y, width, length") from exc
+
+        name = room.get("name", f"Room {i + 1}")
+
+        is_valid, message = validate_inputs(length, width, pipe_spacing)
+        if not is_valid:
+            if "Continue?" in message:
+                warnings.append(f"{name}: pipe spacing less than 0.1m may be impractical.")
+            else:
+                raise LayoutError(f"{name}: {message}")
+
+        try:
+            coords, x_positions, y_positions, n_vert, n_horiz, length_m = generate_coordinates(
+                length, width, pipe_spacing, origin=(x, y)
+            )
+        except ValueError as exc:
+            raise LayoutError(f"{name}: {exc}") from exc
+
+        area = width * length
+        covered = max(width - 2 * pipe_spacing, 0) * max(length - 2 * pipe_spacing, 0)
+        total_pipe += float(length_m)
+        total_area += area
+        total_covered += covered
+        walls.extend(_rect_edges(x, y, width, length))
+        if room.get("openings"):
+            all_openings.extend(room["openings"])
+
+        room_results.append({
+            "name": name,
+            "x": round(x, 4),
+            "y": round(y, 4),
+            "width": width,
+            "length": length,
+            "coordinates": [[round(cx, 4), round(cy, 4)] for cx, cy in coords],
+            "pipe_length_m": round(float(length_m), 4),
+            "coverage": {
+                "room_area_m2": round(area, 4),
+                "covered_area_m2": round(covered, 4),
+                "coverage_percent": round((covered / area) * 100, 2) if area else 0.0,
+            },
+        })
+
+    floor_width = max(r["x"] + r["width"] for r in room_results)
+    floor_length = max(r["y"] + r["length"] for r in room_results)
+
+    # De-duplicate coincident wall segments (shared interior walls).
+    unique_walls = []
+    seen = set()
+    for seg in walls:
+        key = tuple(round(v, 4) for v in seg)
+        rkey = (key[2], key[3], key[0], key[1])
+        if key not in seen and rkey not in seen:
+            seen.add(key)
+            unique_walls.append(tuple(round(v, 4) for v in seg))
+
+    # Cut doorways/openings out of the walls, leaving gaps.
+    opening_segments = [_normalize_opening(op, i) for i, op in enumerate(all_openings)]
+    unique_walls = _subtract_openings(unique_walls, opening_segments)
+    unique_walls = [[round(v, 4) for v in seg] for seg in unique_walls]
+
+    return {
+        "pipe_spacing": pipe_spacing,
+        "floor_width": round(floor_width, 4),
+        "floor_length": round(floor_length, 4),
+        "rooms": room_results,
+        "walls": unique_walls,
+        "openings": [[round(v, 4) for v in seg] for seg in opening_segments],
+        "totals": {
+            "num_rooms": len(room_results),
+            "pipe_length_m": round(total_pipe, 4),
+            "floor_area_m2": round(total_area, 4),
+            "covered_area_m2": round(total_covered, 4),
+            "coverage_percent": round((total_covered / total_area) * 100, 2) if total_area else 0.0,
         },
         "warnings": warnings,
     }

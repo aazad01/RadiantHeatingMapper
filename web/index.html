@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Radiant Heating Layout Mapper</title>
+<style>
+  :root { --bg:#f4f6f8; --card:#fff; --ink:#1f2933; --muted:#52606d; --line:#cbd2d9;
+          --accent:#2f6fd0; --accent-d:#275fb0; --err:#cf1124; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; margin:0; background:var(--bg); color:var(--ink); }
+  header { background:#1f2933; color:#fff; padding:1rem 1.5rem; display:flex; align-items:center;
+           justify-content:space-between; flex-wrap:wrap; gap:.5rem; }
+  header h1 { margin:0; font-size:1.2rem; }
+  header .sub { color:#9aa5b1; font-size:.8rem; }
+  main { max-width:1080px; margin:1.25rem auto; padding:0 1rem; }
+  .tabs { display:flex; gap:.5rem; margin-bottom:1rem; }
+  .tab { padding:.5rem 1rem; border:1px solid var(--line); background:#fff; border-radius:8px;
+         cursor:pointer; font-size:.95rem; }
+  .tab[aria-selected="true"] { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .panel { display:none; }
+  .panel.active { display:block; }
+  .card { background:var(--card); padding:1rem 1.25rem; border-radius:10px;
+          box-shadow:0 1px 3px rgba(0,0,0,.08); margin-bottom:1rem; }
+  label { display:flex; flex-direction:column; font-size:.8rem; color:var(--muted); gap:.25rem; }
+  input { padding:.45rem .5rem; border:1px solid var(--line); border-radius:6px; width:100%; font-size:.95rem; }
+  .row { display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end; }
+  .row > * { flex:1; min-width:7rem; }
+  button { padding:.55rem 1.1rem; background:var(--accent); color:#fff; border:0; border-radius:6px;
+           cursor:pointer; font-size:.95rem; }
+  button:hover { background:var(--accent-d); }
+  button.secondary { background:#e4e7eb; color:#1f2933; }
+  button.secondary:hover { background:#cbd2d9; }
+  button.mini { padding:.3rem .6rem; font-size:.8rem; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  th, td { padding:.4rem .5rem; text-align:left; border-bottom:1px solid #eef1f4; }
+  th { color:var(--muted); font-weight:600; font-size:.78rem; }
+  td input { padding:.3rem .4rem; }
+  .stats { display:flex; gap:1.25rem; flex-wrap:wrap; margin-bottom:.75rem; }
+  .stat b { display:block; font-size:1.3rem; }
+  .stat span { color:var(--muted); font-size:.78rem; }
+  .drawing { background:#fff; border:1px solid #e4e7eb; border-radius:8px; padding:.5rem; overflow:auto; }
+  .drawing svg { max-width:100%; height:auto; display:block; margin:0 auto; }
+  .err { color:var(--err); font-size:.9rem; }
+  .toolbar { display:flex; gap:.5rem; flex-wrap:wrap; margin:.75rem 0; align-items:center; }
+  details summary { cursor:pointer; color:var(--muted); font-size:.85rem; }
+  .hint { color:#7b8794; font-size:.8rem; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Radiant Heating Layout Mapper</h1>
+    <div class="sub">Map serpentine pipe layouts for rooms and multi-room floor plans</div>
+  </div>
+  <div class="sub"><a href="openapi.json" id="apiLink" style="color:#9aa5b1">API spec</a></div>
+</header>
+<main>
+  <div class="tabs" role="tablist">
+    <div class="tab" role="tab" data-tab="single" aria-selected="true">Single room</div>
+    <div class="tab" role="tab" data-tab="floor" aria-selected="false">Floor plan</div>
+  </div>
+
+  <details class="card">
+    <summary>Backend settings</summary>
+    <div style="margin-top:.75rem">
+      <label>API base URL (leave blank to use this site's origin)
+        <input id="apiBase" placeholder="https://your-api-host" />
+      </label>
+      <p class="hint">Set this if the page is hosted separately from the API (e.g. on GitHub Pages).
+        It is saved in your browser.</p>
+    </div>
+  </details>
+
+  <!-- Single room -->
+  <section class="panel active" id="panel-single">
+    <div class="card">
+      <div class="row">
+        <label>Room length (m)<input id="s_length" type="number" step="any" value="5"/></label>
+        <label>Room width (m)<input id="s_width" type="number" step="any" value="4"/></label>
+        <label>Pipe spacing (m)<input id="s_spacing" type="number" step="any" value="0.2"/></label>
+        <div style="flex:0"><button id="s_go">Generate</button></div>
+      </div>
+    </div>
+    <div class="card" id="s_result" style="display:none">
+      <div class="stats" id="s_stats"></div>
+      <div class="toolbar">
+        <button class="secondary mini" id="s_dl_svg">Download SVG</button>
+        <button class="secondary mini" id="s_dl_png">Download PNG</button>
+      </div>
+      <div class="drawing" id="s_draw"></div>
+    </div>
+    <p class="err" id="s_err"></p>
+  </section>
+
+  <!-- Floor plan -->
+  <section class="panel" id="panel-floor">
+    <div class="card">
+      <div class="row" style="margin-bottom:.75rem">
+        <label style="flex:0 0 10rem">Pipe spacing (m)<input id="f_spacing" type="number" step="any" value="0.2"/></label>
+      </div>
+      <h4 style="margin:.5rem 0">Rooms <span class="hint">(x, y = bottom-left corner in floor metres)</span></h4>
+      <table id="f_rooms"><thead><tr>
+        <th>Name</th><th>x</th><th>y</th><th>width</th><th>length</th><th></th>
+      </tr></thead><tbody></tbody></table>
+      <button class="secondary mini" id="f_add_room" style="margin-top:.5rem">+ Add room</button>
+
+      <h4 style="margin:1rem 0 .5rem">Doorway openings <span class="hint">(segment cut into a wall: x1,y1 → x2,y2)</span></h4>
+      <table id="f_openings"><thead><tr>
+        <th>x1</th><th>y1</th><th>x2</th><th>y2</th><th></th>
+      </tr></thead><tbody></tbody></table>
+      <button class="secondary mini" id="f_add_open" style="margin-top:.5rem">+ Add opening</button>
+
+      <div class="toolbar" style="margin-top:1rem">
+        <button id="f_go">Generate floor plan</button>
+        <button class="secondary" id="f_example">Load example</button>
+      </div>
+    </div>
+    <div class="card" id="f_result" style="display:none">
+      <div class="stats" id="f_stats"></div>
+      <div class="toolbar">
+        <button class="secondary mini" id="f_dl_svg">Download SVG</button>
+        <button class="secondary mini" id="f_dl_png">Download PNG</button>
+      </div>
+      <div class="drawing" id="f_draw"></div>
+      <table id="f_breakdown" style="margin-top:1rem"></table>
+    </div>
+    <p class="err" id="f_err"></p>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const apiBase = () => ($("apiBase").value || "").replace(/\/$/, "");
+const url = (p) => apiBase() + p;
+
+// Persist API base.
+$("apiBase").value = localStorage.getItem("rh_api_base") || "";
+$("apiBase").addEventListener("change", () => {
+  localStorage.setItem("rh_api_base", $("apiBase").value);
+  $("apiLink").href = url("/openapi.json");
+});
+$("apiLink").href = url("/openapi.json");
+
+// Tabs.
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", "false"));
+  t.setAttribute("aria-selected", "true");
+  document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+  $("panel-" + t.dataset.tab).classList.add("active");
+}));
+
+function download(filename, blob) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ---- Single room ----
+let sSvg = "";
+async function runSingle() {
+  $("s_err").textContent = "";
+  const q = new URLSearchParams({
+    room_length: $("s_length").value, room_width: $("s_width").value,
+    pipe_spacing: $("s_spacing").value,
+  });
+  try {
+    const jr = await fetch(url("/api/layout?" + q));
+    const data = await jr.json();
+    if (!jr.ok) throw new Error(data.error || "Error");
+    const sr = await fetch(url("/api/layout.svg?" + q + "&width=760"));
+    sSvg = await sr.text();
+    const c = data.coverage;
+    $("s_stats").innerHTML = stat(data.pipe_length_m + " m", "Pipe length")
+      + stat(c.coverage_percent + "%", "Coverage")
+      + stat(c.room_area_m2 + " m²", "Room area")
+      + stat(data.coordinates.length, "Path points")
+      + (data.warnings && data.warnings.length ? `<div class="err">${data.warnings.join(" ")}</div>` : "");
+    $("s_draw").innerHTML = sSvg;
+    $("s_result").style.display = "block";
+  } catch (e) { $("s_err").textContent = e.message; }
+}
+$("s_go").addEventListener("click", runSingle);
+$("s_dl_svg").addEventListener("click", () => sSvg && download("layout.svg", new Blob([sSvg], {type:"image/svg+xml"})));
+$("s_dl_png").addEventListener("click", async () => {
+  const q = new URLSearchParams({room_length:$("s_length").value, room_width:$("s_width").value, pipe_spacing:$("s_spacing").value});
+  await downloadPng(url("/api/layout.png?" + q), "GET", null, "layout.png", $("s_err"));
+});
+
+// ---- Floor plan ----
+function roomRow(r = {name:"", x:0, y:0, width:4, length:4}) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td><input value="${r.name}"></td>
+    <td><input type="number" step="any" value="${r.x}"></td>
+    <td><input type="number" step="any" value="${r.y}"></td>
+    <td><input type="number" step="any" value="${r.width}"></td>
+    <td><input type="number" step="any" value="${r.length}"></td>
+    <td><button class="secondary mini">✕</button></td>`;
+  tr.querySelector("button").addEventListener("click", () => tr.remove());
+  return tr;
+}
+function openRow(o = [0,0,0,0]) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = o.map(v => `<td><input type="number" step="any" value="${v}"></td>`).join("")
+    + `<td><button class="secondary mini">✕</button></td>`;
+  tr.querySelector("button").addEventListener("click", () => tr.remove());
+  return tr;
+}
+$("f_add_room").addEventListener("click", () => $("f_rooms").querySelector("tbody").appendChild(roomRow()));
+$("f_add_open").addEventListener("click", () => $("f_openings").querySelector("tbody").appendChild(openRow()));
+
+function loadExample() {
+  const rb = $("f_rooms").querySelector("tbody"); rb.innerHTML = "";
+  [["Living",0,0,6,5],["Kitchen",6,0,4,5],["Bedroom",0,5,6,4],["Bathroom",6,5,4,4]]
+    .forEach(([name,x,y,width,length]) => rb.appendChild(roomRow({name,x,y,width,length})));
+  const ob = $("f_openings").querySelector("tbody"); ob.innerHTML = "";
+  [[2.5,0,3.4,0],[6,2,6,2.9],[2,5,2.9,5],[7,5,7.9,5],[6,6.5,6,7.4]]
+    .forEach(o => ob.appendChild(openRow(o)));
+}
+$("f_example").addEventListener("click", loadExample);
+
+function collectFloor() {
+  const rooms = [...$("f_rooms").querySelectorAll("tbody tr")].map(tr => {
+    const i = tr.querySelectorAll("input");
+    return {name:i[0].value||undefined, x:+i[1].value, y:+i[2].value, width:+i[3].value, length:+i[4].value};
+  });
+  const openings = [...$("f_openings").querySelectorAll("tbody tr")].map(tr =>
+    [...tr.querySelectorAll("input")].map(i => +i.value));
+  return {pipe_spacing:+$("f_spacing").value, rooms, openings};
+}
+
+let fSvg = "";
+async function runFloor() {
+  $("f_err").textContent = "";
+  const body = collectFloor();
+  if (!body.rooms.length) { $("f_err").textContent = "Add at least one room."; return; }
+  try {
+    const jr = await fetch(url("/api/floor"), {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    const data = await jr.json();
+    if (!jr.ok) throw new Error(data.error || "Error");
+    const sr = await fetch(url("/api/floor.svg?width=820"), {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    fSvg = await sr.text();
+    const t = data.totals;
+    $("f_stats").innerHTML = stat(t.num_rooms, "Rooms") + stat(t.pipe_length_m + " m", "Total pipe")
+      + stat(t.coverage_percent + "%", "Coverage") + stat(t.floor_area_m2 + " m²", "Floor area")
+      + (data.warnings && data.warnings.length ? `<div class="err">${data.warnings.join(" ")}</div>` : "");
+    $("f_draw").innerHTML = fSvg;
+    $("f_breakdown").innerHTML = "<thead><tr><th>Room</th><th>Size</th><th>Pipe</th><th>Coverage</th></tr></thead><tbody>"
+      + data.rooms.map(r => `<tr><td>${r.name}</td><td>${r.width}×${r.length} m</td>`
+        + `<td>${r.pipe_length_m} m</td><td>${r.coverage.coverage_percent}%</td></tr>`).join("") + "</tbody>";
+    $("f_result").style.display = "block";
+  } catch (e) { $("f_err").textContent = e.message; }
+}
+$("f_go").addEventListener("click", runFloor);
+$("f_dl_svg").addEventListener("click", () => fSvg && download("floor.svg", new Blob([fSvg], {type:"image/svg+xml"})));
+$("f_dl_png").addEventListener("click", () =>
+  downloadPng(url("/api/floor.png"), "POST", JSON.stringify(collectFloor()), "floor.png", $("f_err")));
+
+async function downloadPng(u, method, body, filename, errEl) {
+  errEl.textContent = "";
+  try {
+    const r = await fetch(u, {method, headers: body ? {"Content-Type":"application/json"} : {}, body});
+    if (r.status === 501) { errEl.textContent = "PNG rendering isn't available on this backend (no matplotlib). Use SVG."; return; }
+    if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.error || "PNG failed"); }
+    download(filename, await r.blob());
+  } catch (e) { errEl.textContent = e.message; }
+}
+
+function stat(value, label) { return `<div class="stat"><b>${value}</b><span>${label}</span></div>`; }
+
+// Initial render.
+loadExample();
+runSingle();
+</script>
+</body>
+</html>
